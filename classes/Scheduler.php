@@ -3,34 +3,56 @@
 namespace Ultraleet\WP\Scheduler;
 
 use Psr\Log\LoggerInterface;
+use Ultraleet\WP\Scheduler\DB\Database;
 
+/**
+ * Main scheduler class.
+ *
+ * @package Ultraleet\WP\Scheduler
+ *
+ * @property Database $db
+ * @property Cron $cron
+ * @property LoggerInterface $logger
+ */
 class Scheduler
 {
-    /** @var \wpdb */
-    protected $wpdb;
-    protected $logger;
-    protected $tableTasks;
+    const CRON_HOOK = 'ultraleet_scheduler_process_queue';
+    const CRON_SCHEDULE = 'every_minute';
 
-    public function __construct()
+    protected $pluginFile;
+    protected $db;
+    protected $cron;
+    protected $logger;
+
+    /**
+     * Scheduler constructor.
+     *
+     * @param string $pluginFile REQUIRED for deactivation hook to unschedule the queue processing event.
+     */
+    public function __construct(string $pluginFile)
     {
+        $this->pluginFile = $pluginFile;
         add_action('plugins_loaded', [$this, 'boot'], 0, 0);
     }
 
+    /**
+     * Boot the library after all plugins have been loaded.
+     */
     public function boot()
     {
-        global $wpdb;
-        $this->tableTasks = $wpdb->prefix . 'ultraleet_scheduler_tasks';
-        $this->wpdb = $wpdb;
-        $this->maybeSetup();
+        $this->getDb()->setup();
+        add_action('init', [$this, 'init'], 1);
     }
 
-    public function maybeSetup()
+    /**
+     * Initialization tasks.
+     */
+    public function init()
     {
-        if ($this->wpdb->get_var("SHOW TABLES LIKE '{$this->tableTasks}'") != $this->tableTasks) {
-            $format = file_get_contents(ULTRALEET_WP_SCHEDULER_DB_PATH . 'create_tasks_table.sql');
-            $query = sprintf($format, $this->tableTasks, $this->wpdb->get_charset_collate());
-            $this->wpdb->query($query);
-        }
+        add_filter('cron_schedules', [$this->getCron(), 'addCronSchedule']);
+        $this->getCron()->schedule();
+        register_deactivation_hook($this->pluginFile, [$this->getCron(), 'unschedule']);
+        add_action(static::CRON_HOOK, [$this, 'run']);
     }
 
     /**
@@ -44,9 +66,18 @@ class Scheduler
      */
     public function schedule(string $group, string $hook, $data, $time = null, $type = 'action')
     {
-        $sql = "INSERT INTO {$this->tableTasks} (type, `group`, hook, data, timestamp)";
-        $data = json_encode($data);
-        $this->wpdb->query($this->wpdb->prepare($sql, $type, $group, $hook, $data, $time));
+        $timestamp = $time ?: time();
+        $format = "INSERT INTO {$this->getDb()->tasks} (type, `group`, hook, data, timestamp) VALUES (%s, %s, %s, %s, %d)";
+        $sql = $this->getDb()->prepare($format, $type, $group, $hook, json_encode($data), $timestamp);
+        $this->getDb()->query($sql);
+    }
+
+    /**
+     * Process scheduled tasks.
+     */
+    public function run()
+    {
+
     }
 
     /**
@@ -67,7 +98,39 @@ class Scheduler
 
         return $this;
     }
+
+    /**
+     * @return Database
+     */
+    public function getDb()
+    {
+        if (!isset($this->db)) {
+            $this->db = new Database();
+        }
+        return $this->db;
+    }
+
+    /**
+     * @return Cron
+     */
+    public function getCron()
+    {
+        if (!isset($this->cron)) {
+            $this->cron = new Cron();
+        }
+        return $this->cron;
+    }
+
+    /**
+     * @param string $name
+     * @return mixed
+     */
+    public function __get(string $name)
+    {
+        $getter = 'get' . ucfirst($name);
+        return $this->$getter();
+    }
 }
 
 // Make sure constants are set
-require_once dirname(__DIR__) . 'ultraleet-wp-scheduler.php';
+require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'ultraleet-wp-scheduler.php';
