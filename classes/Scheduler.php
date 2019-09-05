@@ -100,10 +100,11 @@ class Scheduler
      * Process scheduled tasks.
      *
      * @todo Refactor by extracting classes and methods.
-     * @todo Housekeeping (reset stale running tasks)
      */
     public function run()
     {
+        $this->housekeeping();
+
         $pid = getmypid();
         $batchSize = apply_filters('ultraleet_scheduler_batch_size', static::PROCESS_BATCH_SIZE);
         $runTime = apply_filters('ultraleet_scheduler_run_time', static::RUN_TIME);
@@ -122,8 +123,8 @@ class Scheduler
             if (!empty($taskIds)) {
                 $format = implode(',', array_fill(0, count($taskIds), '%d'));
                 $query = $this->getDb()->prepare(
-                    "UPDATE {$this->getDb()->tasks} SET status = 'running' WHERE id IN ($format)",
-                    $taskIds
+                    "UPDATE {$this->getDb()->tasks} SET status = 'running', timestamp = %d WHERE id IN ($format)",
+                    array_merge([time()], $taskIds)
                 );
                 $this->getDb()->query($query);
             }
@@ -138,6 +139,26 @@ class Scheduler
         if (isset($this->logger) && $tasksCompleted) {
             $time = time() - $startTime;
             $this->logger->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds.");
+        }
+    }
+
+    /**
+     * Reset tasks set to be running that have been running for more than 5 minutes.
+     */
+    protected function housekeeping()
+    {
+        $timestamp = time() - 300; // 5 minutes
+        $sql = "SELECT id FROM {$this->getDb()->tasks} WHERE status='running' AND timestamp < $timestamp";
+        $taskIds = $this->getDb()->get_col($sql);
+        if ($count = count($taskIds)) {
+            $pid = getmypid();
+            $this->logger->debug("SCHEDULER [$pid]: Resetting $count stale tasks.");
+            $format = implode(',', array_fill(0, count($taskIds), '%d'));
+            $query = $this->getDb()->prepare(
+                "UPDATE {$this->getDb()->tasks} SET status = 'pending' WHERE id IN ($format)",
+                $taskIds
+            );
+            $this->getDb()->query($query);
         }
     }
 
