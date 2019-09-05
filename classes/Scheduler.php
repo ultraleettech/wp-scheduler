@@ -19,7 +19,8 @@ class Scheduler
     const CRON_HOOK = 'ultraleet_scheduler_process_queue';
     const CRON_SCHEDULE = 'every_minute';
     const RUN_TIME = 180;
-    const BATCH_SIZE = 25;
+    const PROCESS_BATCH_SIZE = 25;
+    const INSERT_BATCH_SIZE = 50;
 
     protected $pluginFile;
     protected $db;
@@ -77,6 +78,25 @@ class Scheduler
     }
 
     /**
+     * Schedule tasks in bulk.
+     *
+     * @param array $tasks
+     */
+    public function scheduleBulk(array $tasks)
+    {
+        $data = [];
+        foreach ($tasks as $index => $task) {
+            if (!($index % static::INSERT_BATCH_SIZE) && count($data)) {
+                $this->getDb()->insertBatch($data, 'tasks');
+                $data = [];
+            }
+            $task['data'] = json_encode($task['data']);
+            $data[] = array_merge(['timestamp' => time(), 'type' => 'action'], $task);
+        }
+        $this->getDb()->insertBatch($data, 'tasks');
+    }
+
+    /**
      * Process scheduled tasks.
      *
      * @todo Refactor by extracting classes and methods.
@@ -85,7 +105,7 @@ class Scheduler
     public function run()
     {
         $pid = getmypid();
-        $batchSize = apply_filters('ultraleet_scheduler_batch_size', static::BATCH_SIZE);
+        $batchSize = apply_filters('ultraleet_scheduler_batch_size', static::PROCESS_BATCH_SIZE);
         $runTime = apply_filters('ultraleet_scheduler_run_time', static::RUN_TIME);
         $startTime = time();
         $tasksCompleted = 0;
@@ -146,7 +166,7 @@ class Scheduler
     public function getDb()
     {
         if (!isset($this->db)) {
-            $this->db = new Database();
+            $this->db = new Database($this->logger);
         }
         return $this->db;
     }
