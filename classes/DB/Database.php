@@ -61,7 +61,7 @@ class Database
             $columns = implode(',', $columns);
             $values = [];
             foreach ($rows as $row) {
-                $values[] = vsprintf($format, array_values($row));
+                $values[] = vsprintf($format, array_map('esc_sql', $row));
             }
             $table = $this->tables[$table] ?? $table;
             $sql = "INSERT INTO {$table} ($columns) VALUES " . implode(',', $values);

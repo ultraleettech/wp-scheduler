@@ -73,7 +73,7 @@ class Scheduler
     {
         $timestamp = $time ?: time();
         $format = "INSERT INTO {$this->getDb()->tasks} (type, `group`, hook, data, timestamp) VALUES (%s, %s, %s, %s, %d)";
-        $sql = $this->getDb()->prepare($format, $type, $group, $hook, json_encode($data), $timestamp);
+        $sql = $this->getDb()->prepare($format, $type, $group, $hook, json_encode($data, JSON_UNESCAPED_UNICODE), $timestamp);
         $this->getDb()->query($sql);
     }
 
@@ -90,7 +90,7 @@ class Scheduler
                 $this->getDb()->insertBatch($data, 'tasks');
                 $data = [];
             }
-            $task['data'] = json_encode($task['data']);
+            $task['data'] = json_encode($task['data'], JSON_UNESCAPED_UNICODE);
             $data[] = array_merge(['timestamp' => time(), 'type' => 'action'], $task);
         }
         $this->getDb()->insertBatch($data, 'tasks');
