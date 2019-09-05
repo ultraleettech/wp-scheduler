@@ -18,6 +18,8 @@ class Scheduler
 {
     const CRON_HOOK = 'ultraleet_scheduler_process_queue';
     const CRON_SCHEDULE = 'every_minute';
+    const RUN_TIME = 180;
+    const BATCH_SIZE = 25;
 
     protected $pluginFile;
     protected $db;
@@ -63,6 +65,8 @@ class Scheduler
      * @param $data
      * @param int $time
      * @param string $type
+     *
+     * @todo Refactor by extracting classes and methods.
      */
     public function schedule(string $group, string $hook, $data, $time = null, $type = 'action')
     {
@@ -74,10 +78,47 @@ class Scheduler
 
     /**
      * Process scheduled tasks.
+     *
+     * @todo Refactor by extracting classes and methods.
+     * @todo Housekeeping (reset stale running tasks)
      */
     public function run()
     {
-
+        $pid = getmypid();
+        $batchSize = apply_filters('ultraleet_scheduler_batch_size', static::BATCH_SIZE);
+        $runTime = apply_filters('ultraleet_scheduler_run_time', static::RUN_TIME);
+        $startTime = time();
+        $tasksCompleted = 0;
+        do {
+            $format = "SELECT * FROM {$this->getDb()->tasks} WHERE timestamp <= %d AND status = 'pending' LIMIT 0, $batchSize";
+            $sql = $this->getDb()->prepare($format, time());
+            $tasks = $this->getDb()->get_results($sql, ARRAY_A);
+            if (!empty($tasks) && !$tasksCompleted && isset($this->logger)) {
+                $this->logger->debug("SCHEDULER [$pid]: Processing task queue.");
+            }
+            $taskIds = array_map(function ($task) {
+                return $task['id'];
+            }, $tasks);
+            if (!empty($taskIds)) {
+                $format = implode(',', array_fill(0, count($taskIds), '%d'));
+                $query = $this->getDb()->prepare(
+                    "UPDATE {$this->getDb()->tasks} SET status = 'running' WHERE id IN ($format)",
+                    $taskIds
+                );
+                $this->getDb()->query($query);
+            }
+            foreach ($tasks as $task) {
+                do_action($task['hook'], json_decode($task['data'], true));
+                $this->getDb()->query(
+                    "UPDATE {$this->getDb()->tasks} SET status = 'complete' WHERE id = {$task['id']}"
+                );
+                $tasksCompleted++;
+            }
+        } while (!empty($tasks) && (time() <= $startTime + $runTime));
+        if (isset($this->logger) && $tasksCompleted) {
+            $time = time() - $startTime;
+            $this->logger->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds.");
+        }
     }
 
     /**
@@ -132,5 +173,5 @@ class Scheduler
     }
 }
 
-// Make sure constants are set
+// Make sure constants and functions are defined
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'ultraleet-wp-scheduler.php';

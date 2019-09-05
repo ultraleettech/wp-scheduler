@@ -12,10 +12,10 @@ class Cron
      */
     public function addCronSchedule(array $schedules)
     {
-        $schedules['every_minute'] = array(
+        $schedules['every_minute'] = [
             'interval' => 60, // in seconds
-            'display'  => __('Every minute'),
-        );
+            'display' => __('Every minute'),
+        ];
         return $schedules;
     }
 
