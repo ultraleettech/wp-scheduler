@@ -112,23 +112,32 @@ class Scheduler
         $tasksCompleted = 0;
         $tasksFailed = 0;
         do {
-            $format = "SELECT * FROM {$this->getDb()->tasks} WHERE timestamp <= %d AND status = 'pending' LIMIT 0, $batchSize";
-            $sql = $this->getDb()->prepare($format, time());
-            $tasks = $this->getDb()->get_results($sql, ARRAY_A);
-            if (!empty($tasks) && !$tasksCompleted && isset($this->logger)) {
-                $this->logger->debug("SCHEDULER [$pid]: Processing task queue.");
+            // make sure all tasks from one group are completed before continuing with the next one
+            $format = "SELECT `group` FROM {$this->getDb()->tasks} WHERE timestamp <= %d AND status IN ('pending', 'running') LIMIT 0, 1";
+            $group = $this->getDb()->get_var($this->getDb()->prepare($format, time()));
+            if (!$group) {
+                break;
             }
+
+            // fetch next batch of tasks
+            $format = "SELECT * FROM {$this->getDb()->tasks} WHERE timestamp <= %d AND status = 'pending' AND `group` = %s LIMIT 0, $batchSize";
+            $sql = $this->getDb()->prepare($format, time(), $group);
+            $tasks = $this->getDb()->get_results($sql, ARRAY_A);
+            if (empty($tasks)) {
+                break;
+            }
+
+            // run tasks
+            $this->logger->debug("SCHEDULER [$pid]: Processing task queue.");
             $taskIds = array_map(function ($task) {
                 return $task['id'];
             }, $tasks);
-            if (!empty($taskIds)) {
-                $format = implode(',', array_fill(0, count($taskIds), '%d'));
-                $query = $this->getDb()->prepare(
-                    "UPDATE {$this->getDb()->tasks} SET status = 'running', timestamp = %d WHERE id IN ($format)",
-                    array_merge([time()], $taskIds)
-                );
-                $this->getDb()->query($query);
-            }
+            $format = implode(',', array_fill(0, count($taskIds), '%d'));
+            $query = $this->getDb()->prepare(
+                "UPDATE {$this->getDb()->tasks} SET status = 'running', timestamp = %d WHERE id IN ($format)",
+                array_merge([time()], $taskIds)
+            );
+            $this->getDb()->query($query);
             foreach ($tasks as $task) {
                 try {
                     do_action($task['hook'], json_decode($task['data'], true));
@@ -138,14 +147,20 @@ class Scheduler
                     $tasksCompleted++;
                 } catch (\Throwable $exception) {
                     $this->getDb()->query(
-                        "UPDATE {$this->getDb()->tasks} SET status = 'failed' WHERE id = {$task['id']}"
+                        $this->getDb()->prepare(
+                            "UPDATE {$this->getDb()->tasks} SET status = 'failed', timestamp = %d WHERE id = {$task['id']}",
+                            time()
+                        )
                     );
-                    $this->logger->debug("SCHEDULER [$pid]: Task #{$task['id']} failed.");
-                    $this->logger->debug("SCHEDULER [$pid]: " . $exception->getMessage(), $exception->getTrace());
+                    if (isset($this->logger)) {
+                        $this->logger->debug("SCHEDULER [$pid]: Task #{$task['id']} failed.");
+                        $this->logger->debug("SCHEDULER [$pid]: " . $exception->getMessage(), $exception->getTrace());
+                    }
                     $tasksFailed++;
                 }
             }
         } while (!empty($tasks) && (time() <= $startTime + $runTime));
+
         if (isset($this->logger) && $tasksCompleted) {
             $time = time() - $startTime;
             $this->logger->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds.");
