@@ -110,6 +110,7 @@ class Scheduler
         $runTime = apply_filters('ultraleet_scheduler_run_time', static::RUN_TIME);
         $startTime = time();
         $tasksCompleted = 0;
+        $tasksFailed = 0;
         do {
             $format = "SELECT * FROM {$this->getDb()->tasks} WHERE timestamp <= %d AND status = 'pending' LIMIT 0, $batchSize";
             $sql = $this->getDb()->prepare($format, time());
@@ -129,11 +130,20 @@ class Scheduler
                 $this->getDb()->query($query);
             }
             foreach ($tasks as $task) {
-                do_action($task['hook'], json_decode($task['data'], true));
-                $this->getDb()->query(
-                    "UPDATE {$this->getDb()->tasks} SET status = 'complete' WHERE id = {$task['id']}"
-                );
-                $tasksCompleted++;
+                try {
+                    do_action($task['hook'], json_decode($task['data'], true));
+                    $this->getDb()->query(
+                        "UPDATE {$this->getDb()->tasks} SET status = 'complete' WHERE id = {$task['id']}"
+                    );
+                    $tasksCompleted++;
+                } catch (\Throwable $exception) {
+                    $this->getDb()->query(
+                        "UPDATE {$this->getDb()->tasks} SET status = 'failed' WHERE id = {$task['id']}"
+                    );
+                    $this->logger->debug("SCHEDULER [$pid]: Task #{$task['id']} failed.");
+                    $this->logger->debug("SCHEDULER [$pid]: " . $exception->getMessage(), $exception->getTrace());
+                    $tasksFailed++;
+                }
             }
         } while (!empty($tasks) && (time() <= $startTime + $runTime));
         if (isset($this->logger) && $tasksCompleted) {
