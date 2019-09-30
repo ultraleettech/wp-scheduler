@@ -18,27 +18,41 @@ class Database
 {
     /** @var \wpdb */
     protected $wpdb;
-    protected $tables;
+    protected $tables = [
+        'tasks' => 'ultraleet_scheduler_tasks',
+    ];
 
     /** @var LoggerInterface */
     protected $logger;
 
+    /**
+     * Database constructor.
+     *
+     * Prefixes table names as needed.
+     *
+     * @param $logger
+     */
     public function __construct($logger)
     {
         global $wpdb;
         $this->wpdb = $wpdb;
-        $this->tables = [
-            'tasks' => $wpdb->prefix . 'ultraleet_scheduler_tasks',
-        ];
+        foreach ($this->tables as $index => $table) {
+            $this->tables[$index] = $wpdb->prefix . $table;
+        }
         $this->logger = $logger;
     }
 
+    /**
+     * Setup database tables.
+     */
     public function setup()
     {
-        if ($this->wpdb->get_var("SHOW TABLES LIKE '{$this->tasks}'") != $this->tasks) {
-            $format = file_get_contents(ULTRALEET_WP_SCHEDULER_DB_PATH . 'create_tasks_table.sql');
-            $query = sprintf($format, $this->tasks, $this->wpdb->get_charset_collate());
-            $this->wpdb->query($query);
+        foreach ($this->tables as $key => $table) {
+            if ($this->wpdb->get_var("SHOW TABLES LIKE '$table'") != $table) {
+                $format = file_get_contents(ULTRALEET_WP_SCHEDULER_DB_PATH . "create_{$key}_table.sql");
+                $query = sprintf($format, $table, $this->wpdb->get_charset_collate());
+                $this->wpdb->query($query);
+            }
         }
     }
 
