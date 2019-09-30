@@ -135,7 +135,9 @@ class Scheduler
             }
 
             // run tasks
-            $this->logger->debug("SCHEDULER [$pid]: Processing task queue.");
+            if (!$tasksCompleted && !$tasksFailed) {
+                $this->logger->debug("SCHEDULER [$pid]: Processing task queue.");
+            }
             $this->updateTasksStatus($tasks, 'running');
             foreach ($tasks as $task) {
                 try {
@@ -158,7 +160,7 @@ class Scheduler
                     $tasksFailed++;
                 }
             }
-        } while (!empty($tasks) && (time() < $startTime + $runTime));
+        } while (time() < $startTime + $runTime);
         if (isset($this->logger) && $tasksCompleted) {
             $time = time() - $startTime;
             $this->logger->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds.");
