@@ -84,6 +84,12 @@ class Scheduler
      */
     public function scheduleBulk(array $tasks)
     {
+        if (1 === count($tasks)) {
+            $task = array_merge(['timestamp' => time(), 'type' => 'action'], current($tasks));
+            $this->schedule($task['group'], $task['hook'], $task['data'], $task['timestamp'], $task['type']);
+            return;
+        }
+
         $data = [];
         foreach ($tasks as $index => $task) {
             if (!($index % static::INSERT_BATCH_SIZE) && count($data)) {
@@ -129,15 +135,7 @@ class Scheduler
 
             // run tasks
             $this->logger->debug("SCHEDULER [$pid]: Processing task queue.");
-            $taskIds = array_map(function ($task) {
-                return $task['id'];
-            }, $tasks);
-            $format = implode(',', array_fill(0, count($taskIds), '%d'));
-            $query = $this->getDb()->prepare(
-                "UPDATE {$this->getDb()->tasks} SET status = 'running', timestamp = %d WHERE id IN ($format)",
-                array_merge([time()], $taskIds)
-            );
-            $this->getDb()->query($query);
+            $this->updateTasksStatus($tasks, 'running');
             foreach ($tasks as $task) {
                 try {
                     do_action($task['hook'], json_decode($task['data'], true));
@@ -159,8 +157,7 @@ class Scheduler
                     $tasksFailed++;
                 }
             }
-        } while (!empty($tasks) && (time() <= $startTime + $runTime));
-
+        } while (!empty($tasks) && (time() < $startTime + $runTime));
         if (isset($this->logger) && $tasksCompleted) {
             $time = time() - $startTime;
             $this->logger->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds.");
@@ -178,13 +175,28 @@ class Scheduler
         if ($count = count($taskIds)) {
             $pid = getmypid();
             $this->logger->debug("SCHEDULER [$pid]: Resetting $count stale tasks.");
-            $format = implode(',', array_fill(0, count($taskIds), '%d'));
-            $query = $this->getDb()->prepare(
-                "UPDATE {$this->getDb()->tasks} SET status = 'pending' WHERE id IN ($format)",
-                $taskIds
-            );
-            $this->getDb()->query($query);
+            $this->updateTasksStatus($taskIds, 'pending');
         }
+    }
+
+    /**
+     * @param array $tasks
+     * @param string $status
+     */
+    protected function updateTasksStatus(array $tasks, string $status)
+    {
+        $taskIds = is_array(current($tasks)) ? array_map(
+            function ($task) {
+                return $task['id'];
+            },
+            $tasks
+        ) : $tasks;
+        $format = implode(',', array_fill(0, count($taskIds), '%d'));
+        $query = $this->getDb()->prepare(
+            "UPDATE {$this->getDb()->tasks} SET status = %s, timestamp = %d WHERE id IN ($format)",
+            array_merge([$status, time()], $taskIds)
+        );
+        $this->getDb()->query($query);
     }
 
     /**
