@@ -21,6 +21,7 @@ class Scheduler
     const RUN_TIME = 180;
     const PROCESS_BATCH_SIZE = 25;
     const INSERT_BATCH_SIZE = 50;
+    const DELETE_TASKS_OLDER_THAN = 60*60*24*30; // 30 days
 
     protected $pluginFile;
     protected $db;
@@ -166,6 +167,8 @@ class Scheduler
 
     /**
      * Reset tasks set to be running that have been running for more than 5 minutes.
+     *
+     * Also clean up tasks queue table by removing old tasks.
      */
     protected function housekeeping()
     {
@@ -177,6 +180,10 @@ class Scheduler
             $this->logger->debug("SCHEDULER [$pid]: Resetting $count stale tasks.");
             $this->updateTasksStatus($taskIds, 'pending');
         }
+
+        $timestamp = time() - static::DELETE_TASKS_OLDER_THAN;
+        $sql = "DELETE FROM {$this->getDb()->tasks} WHERE timestamp < $timestamp";
+        $this->getDb()->query($sql);
     }
 
     /**
