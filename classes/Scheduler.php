@@ -112,6 +112,11 @@ class Scheduler
     {
         $this->housekeeping();
 
+        /**
+         * Allow plugins to run custom code before each task queue processing starts.
+         */
+        do_action('ultraleet_scheduler_before_run');
+
         $pid = getmypid();
         $batchSize = apply_filters('ultraleet_scheduler_batch_size', static::PROCESS_BATCH_SIZE);
         $runTime = apply_filters('ultraleet_scheduler_run_time', static::RUN_TIME);
@@ -163,8 +168,16 @@ class Scheduler
         } while (time() < $startTime + $runTime);
         if (isset($this->logger) && $tasksCompleted) {
             $time = time() - $startTime;
-            $this->logger->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds.");
+            $this->logger->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds." . ($tasksFailed ? " $tasksFailed failed." : ''));
         }
+
+        /**
+         * Allow plugins to run custom code after each task queue processing completes.
+         *
+         * @param int $tasksCompleted How many tasks were successfully completed.
+         * @param int $tasksFailed How many tasks failed due to exceptions.
+         */
+        do_action('ultraleet_scheduler_after_run', $tasksCompleted, $tasksFailed);
     }
 
     /**
