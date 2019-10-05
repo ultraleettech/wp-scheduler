@@ -126,7 +126,10 @@ class Scheduler
         do {
             // make sure all tasks from one group are completed before continuing with the next one
             $format = "SELECT `group` FROM {$this->getDb()->tasks} WHERE timestamp <= %d AND status IN ('pending', 'running') LIMIT 0, 1";
-            $group = $this->getDb()->get_var($this->getDb()->prepare($format, time()));
+            $firstGroup = $this->getDb()->get_var($this->getDb()->prepare($format, time()));
+            if (!isset($group) || $group === $firstGroup) {
+                $group = $firstGroup;
+            }
             if (!$group) {
                 break;
             }
@@ -135,7 +138,7 @@ class Scheduler
             $format = "SELECT * FROM {$this->getDb()->tasks} WHERE timestamp <= %d AND status = 'pending' AND `group` = %s LIMIT 0, $batchSize";
             $sql = $this->getDb()->prepare($format, time(), $group);
             $tasks = $this->getDb()->get_results($sql, ARRAY_A);
-            if (empty($tasks)) {
+            if (empty($tasks) && $group === $firstGroup) {
                 break;
             }
 
@@ -207,6 +210,9 @@ class Scheduler
      */
     protected function updateTasksStatus(array $tasks, string $status)
     {
+        if (empty($tasks)) {
+            return;
+        }
         $taskIds = is_array(current($tasks)) ? array_map(
             function ($task) {
                 return $task['id'];
