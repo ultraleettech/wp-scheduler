@@ -2,7 +2,9 @@
 
 namespace Ultraleet\WP\Scheduler;
 
+use Monolog\Logger;
 use Psr\Log\LoggerInterface;
+use Monolog\Handler\NullHandler;
 use Ultraleet\WP\Scheduler\DB\Database;
 
 /**
@@ -144,7 +146,7 @@ class Scheduler
 
             // run tasks
             if (!$tasksCompleted && !$tasksFailed) {
-                $this->logger->debug("SCHEDULER [$pid]: Processing task queue.");
+                $this->getLogger()->debug("SCHEDULER [$pid]: Processing task queue.");
             }
             $this->updateTasksStatus($tasks, 'running');
             foreach ($tasks as $task) {
@@ -161,17 +163,15 @@ class Scheduler
                             time()
                         )
                     );
-                    if (isset($this->logger)) {
-                        $this->logger->debug("SCHEDULER [$pid]: Task #{$task['id']} failed.");
-                        $this->logger->debug("SCHEDULER [$pid]: " . $exception->getMessage(), $exception->getTrace());
-                    }
+                    $this->getLogger()->debug("SCHEDULER [$pid]: Task #{$task['id']} failed.");
+                    $this->getLogger()->debug("SCHEDULER [$pid]: " . $exception->getMessage(), $exception->getTrace());
                     $tasksFailed++;
                 }
             }
         } while (time() < $startTime + $runTime);
-        if (isset($this->logger) && $tasksCompleted) {
+        if ($tasksCompleted) {
             $time = time() - $startTime;
-            $this->logger->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds." . ($tasksFailed ? " $tasksFailed failed." : ''));
+            $this->getLogger()->debug("SCHEDULER [$pid]: $tasksCompleted tasks completed in $time seconds." . ($tasksFailed ? " $tasksFailed failed." : ''));
         }
 
         /**
@@ -195,7 +195,7 @@ class Scheduler
         $taskIds = $this->getDb()->get_col($sql);
         if ($count = count($taskIds)) {
             $pid = getmypid();
-            $this->logger->debug("SCHEDULER [$pid]: Resetting $count stale tasks.");
+            $this->getLogger()->debug("SCHEDULER [$pid]: Resetting $count stale tasks.");
             $this->updateTasksStatus($taskIds, 'pending');
         }
 
@@ -230,16 +230,31 @@ class Scheduler
     /**
      * @return LoggerInterface
      */
-    public function getLogger()
+    public function getLogger(): LoggerInterface
     {
+        if (!isset($this->logger)) {
+            $this->createLogger();
+        }
         return $this->logger;
+    }
+
+    /**
+     * Create default logger if none has been set.
+     */
+    private function createLogger()
+    {
+        $this->logger = new Logger(
+            'null', [
+                new NullHandler(),
+            ]
+        );
     }
 
     /**
      * @param LoggerInterface $logger
      * @return Scheduler
      */
-    public function setLogger($logger)
+    public function setLogger(LoggerInterface $logger)
     {
         $this->logger = $logger;
 
@@ -252,7 +267,7 @@ class Scheduler
     public function getDb()
     {
         if (!isset($this->db)) {
-            $this->db = new Database($this->logger);
+            $this->db = new Database($this->getLogger());
         }
         return $this->db;
     }
